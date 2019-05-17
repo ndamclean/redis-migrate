@@ -29,7 +29,7 @@ def shorten(uri):
 
 def migrate(
     srchost, srcport, srcdb, dsthost, dstport, dstdb,
-    srcpasswd=None, dstpasswd=None, replace=True, barpos=0
+    srcpasswd=None, dstpasswd=None, replace=True, barpos=0, match=None
 ):
     """Migrates dataset of a db from source host to destination host"""
     srcr = redis.StrictRedis(
@@ -45,7 +45,7 @@ def migrate(
         pbar.set_description('{} → {}'.format(display_src, display_dst))
         cursor = 0
         while True:
-            cursor, keys = srcr.scan(cursor, count=count)
+            cursor, keys = srcr.scan(cursor, count=count, match=match)
             pipeline = srcr.pipeline(transaction=False)
             for key in keys:
                 pipeline.pttl(key)
@@ -69,7 +69,7 @@ def migrate(
 
 def migrate_all(
     srchost, srcport, dsthost, dstport,
-    srcpasswd=None, dstpasswd=None, replace=True, nprocs=1
+    srcpasswd=None, dstpasswd=None, replace=True, nprocs=1, match=None
 ):
     """Migrates entire dataset from source host to destination host using multiprocessing"""
     srcr = redis.StrictRedis(host=srchost, port=srcport, charset='utf8')
@@ -80,7 +80,7 @@ def migrate_all(
     pool.starmap(migrate, [
         (
             srchost, srcport, int(db[2:]), dsthost, dstport, int(db[2:]),
-            srcpasswd, dstpasswd, replace, i
+            srcpasswd, dstpasswd, replace, i, match
         )
         for i, db in enumerate(keyspace.keys())
     ])
@@ -95,7 +95,8 @@ def migrate_all(
 @click.option('--replace/--no-replace', default=True, help='Whether to replace the existing key')
 @click.option('--all-keys', is_flag=True, default=False, help='Whether to migrate all dataset/keys')
 @click.option('--nprocs', nargs=1, type=int, default=1, help='Maximum number of processes')
-def main(src, dst, src_password, dst_password, replace, all_keys, nprocs):
+@click.option('--match', nargs=1, help='Match expression for keys')
+def main(src, dst, src_password, dst_password, replace, all_keys, nprocs, match):
     srchost, srcport, srcdb = parse_uri(src)
     dsthost, dstport, dstdb = parse_uri(dst)
 
@@ -103,10 +104,12 @@ def main(src, dst, src_password, dst_password, replace, all_keys, nprocs):
         migrate_all(
             srchost, srcport, dsthost, dstport,
             srcpasswd=src_password, dstpasswd=dst_password, replace=replace,
-            nprocs=nprocs
+            nprocs=nprocs,
+            match=match
         )
     else:
         migrate(
             srchost, srcport, srcdb, dsthost, dstport, dstdb,
-            srcpasswd=src_password, dstpasswd=dst_password, replace=replace
+            srcpasswd=src_password, dstpasswd=dst_password, replace=replace,
+            match=match
         )
