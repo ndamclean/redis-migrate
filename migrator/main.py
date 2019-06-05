@@ -33,10 +33,10 @@ def migrate(
 ):
     """Migrates dataset of a db from source host to destination host"""
     srcr = redis.StrictRedis(
-        host=srchost, port=srcport, db=srcdb, password=srcpasswd, charset='utf8'
+        host=srchost, port=srcport, db=srcdb, password=srcpasswd, decode_responses=True
     )
     dstr = redis.StrictRedis(
-        host=dsthost, port=dstport, db=dstdb, password=dstpasswd, charset='utf8'
+        host=dsthost, port=dstport, db=dstdb, password=dstpasswd, decode_responses=True
     )
 
     with tqdm(total=srcr.dbsize(), ascii=True, unit='keys', unit_scale=True, position=barpos) as pbar:
@@ -48,20 +48,38 @@ def migrate(
             cursor, keys = srcr.scan(cursor, count=count, match=match)
             pipeline = srcr.pipeline(transaction=False)
             for key in keys:
+                pipeline.type(key)
+
+            key_types = pipeline.execute()
+
+            for key, ktype in zip(keys, key_types):
                 pipeline.pttl(key)
-                pipeline.dump(key)
-            dumps = pipeline.execute()
+                if ktype == 'string':
+                    pipeline.get(key)
+                elif ktype == 'hash':
+                    pipeline.hgetall(key)
+                else:
+                    raise ValueError(f'{ktype} key type not yet supported')
+
+            key_data = pipeline.execute()
 
             pipeline = dstr.pipeline(transaction=False)
-            for key, ttl, data in zip(keys, dumps[::2], dumps[1::2]):
-                if data != None:
-                    pipeline.restore(key, ttl if ttl > 0 else 0, data, replace=replace)
+            for key, ktype, pttl, data in zip(keys, key_types, key_data[::2], key_data[1::2]):
+                if data:
+                    if pttl <= 0:
+                        pttl = None
+                    if ktype == 'string':
+                        pipeline.set(key, data, px=pttl)
+                    elif ktype == 'hash':
+                        pipeline.hmset(key, data)
+                        if pttl is not None:
+                            pipeline.pexpire(key, pttl)
+                    else:
+                        raise ValueError(f'{ktype} key type not yet supported')
+
             pbar.update(len(keys))
 
-            results = pipeline.execute(False)
-            for key, result in zip(keys, results):
-                if result not in (b'OK', b'BUSYKEY Target key name already exists.'):
-                    raise Exception('Migration failed on key {}: {}'.format(key, result))
+            pipeline.execute()
 
             if cursor == 0:
                 break
@@ -72,7 +90,7 @@ def migrate_all(
     srcpasswd=None, dstpasswd=None, replace=True, nprocs=1, match=None
 ):
     """Migrates entire dataset from source host to destination host using multiprocessing"""
-    srcr = redis.StrictRedis(host=srchost, port=srcport, charset='utf8')
+    srcr = redis.StrictRedis(host=srchost, port=srcport)
     keyspace = srcr.info('keyspace')
 
     freeze_support()  # for Windows support
