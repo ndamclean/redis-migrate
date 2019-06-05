@@ -29,7 +29,7 @@ def shorten(uri):
 
 def migrate(
     srchost, srcport, srcdb, dsthost, dstport, dstdb,
-    srcpasswd=None, dstpasswd=None, replace=True, barpos=0, match=None
+    srcpasswd=None, dstpasswd=None, barpos=0, match=None
 ):
     """Migrates dataset of a db from source host to destination host"""
     srcr = redis.StrictRedis(
@@ -87,7 +87,7 @@ def migrate(
 
 def migrate_all(
     srchost, srcport, dsthost, dstport,
-    srcpasswd=None, dstpasswd=None, replace=True, nprocs=1, match=None
+    srcpasswd=None, dstpasswd=None, nprocs=1, match=None
 ):
     """Migrates entire dataset from source host to destination host using multiprocessing"""
     srcr = redis.StrictRedis(host=srchost, port=srcport)
@@ -98,7 +98,7 @@ def migrate_all(
     pool.starmap(migrate, [
         (
             srchost, srcport, int(db[2:]), dsthost, dstport, int(db[2:]),
-            srcpasswd, dstpasswd, replace, i, match
+            srcpasswd, dstpasswd, i, match
         )
         for i, db in enumerate(keyspace.keys())
     ])
@@ -110,24 +110,23 @@ def migrate_all(
 @click.argument('dst', nargs=1)
 @click.option('--src-password', nargs=1, help='Password for src Redis')
 @click.option('--dst-password', nargs=1, help='Password for dst Redis')
-@click.option('--replace/--no-replace', default=True, help='Whether to replace the existing key')
 @click.option('--all-keys', is_flag=True, default=False, help='Whether to migrate all dataset/keys')
 @click.option('--nprocs', nargs=1, type=int, default=1, help='Maximum number of processes')
 @click.option('--match', nargs=1, help='Match expression for keys')
-def main(src, dst, src_password, dst_password, replace, all_keys, nprocs, match):
+def main(src, dst, src_password, dst_password, all_keys, nprocs, match):
     srchost, srcport, srcdb = parse_uri(src)
     dsthost, dstport, dstdb = parse_uri(dst)
 
     if all_keys:
         migrate_all(
             srchost, srcport, dsthost, dstport,
-            srcpasswd=src_password, dstpasswd=dst_password, replace=replace,
+            srcpasswd=src_password, dstpasswd=dst_password,
             nprocs=nprocs,
             match=match
         )
     else:
         migrate(
             srchost, srcport, srcdb, dsthost, dstport, dstdb,
-            srcpasswd=src_password, dstpasswd=dst_password, replace=replace,
+            srcpasswd=src_password, dstpasswd=dst_password,
             match=match
         )
